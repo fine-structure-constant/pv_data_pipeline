@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// Service coordinates rule-based and LLM-based paper classification workflows.
 type Service struct {
 	DB            *gorm.DB
 	LLM           llm.Client
@@ -26,6 +27,7 @@ type Service struct {
 	LLMTimeout    time.Duration
 }
 
+// ClassifyPending processes pending papers up to the requested limit and records the outcome.
 func (s Service) ClassifyPending(ctx context.Context, limit int) error {
 	if limit <= 0 {
 		limit = 20
@@ -46,6 +48,7 @@ func (s Service) ClassifyPending(ctx context.Context, limit int) error {
 	return nil
 }
 
+// classifyOne applies rules, optionally calls the LLM, and stores the classification result for one paper.
 func (s Service) classifyOne(ctx context.Context, paper models.Paper, prompt string) error {
 	var keywords []string
 	rule := ApplyRules(paper.Title, paper.Abstract, keywords)
@@ -101,6 +104,7 @@ func (s Service) classifyOne(ctx context.Context, paper models.Paper, prompt str
 	return s.updateExtractionStatus(paper.ID, "done")
 }
 
+// assignRuleTags persists the tags produced by the rule engine for a paper.
 func (s Service) assignRuleTags(paperID string, rule RuleResult) error {
 	for _, t := range rule.Tags {
 		if err := s.assignTag(paperID, t.Code, t.Confidence, "rule", t.Evidence); err != nil {
@@ -110,6 +114,7 @@ func (s Service) assignRuleTags(paperID string, rule RuleResult) error {
 	return nil
 }
 
+// assignLLMTags stores the tag assignments derived from the LLM response.
 func (s Service) assignLLMTags(paperID string, parsed llm.ClassificationResult) error {
 	evidence := strings.Join(parsed.Evidence, " | ")
 	for _, code := range parsed.Families {
@@ -129,6 +134,7 @@ func (s Service) assignLLMTags(paperID string, parsed llm.ClassificationResult) 
 	return nil
 }
 
+// assignTag links a paper to a material class and updates the confidence when an assignment already exists.
 func (s Service) assignTag(paperID, code string, confidence float64, assignedBy, evidence string) error {
 	var cls models.MaterialClass
 	if err := s.DB.Where("code = ?", code).First(&cls).Error; err != nil {
@@ -143,10 +149,12 @@ func (s Service) assignTag(paperID, code string, confidence float64, assignedBy,
 	}).Create(&link).Error
 }
 
+// updateExtractionStatus updates the processing state for a paper after classification completes.
 func (s Service) updateExtractionStatus(paperID, status string) error {
 	return s.DB.Model(&models.Paper{}).Where("id = ?", paperID).Update("extraction_status", status).Error
 }
 
+// buildInput formats the paper metadata into the text payload sent to the classification backend.
 func buildInput(p models.Paper, formulas []string) string {
 	var authors []string
 	_ = json.Unmarshal(p.Authors, &authors)

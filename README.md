@@ -34,15 +34,19 @@ psql -d pvsk_db -c "ALTER DATABASE pvsk_db OWNER TO pvsk_app;"
 psql -d pvsk_db -c "ALTER USER pvsk_app WITH PASSWORD 'password';"
 ```
 
-配置环境变量：
+配置文件：
 
 ```bash
-cp .env.example .env
-export DATABASE_DSN='postgres://pvsk_app:password@127.0.0.1:5432/pvsk_db?sslmode=disable'
-export PVSK_STORAGE_ROOT='/home/rocky/HDDdata/perovskite_papers'
+cp config.example.yaml config.yaml
 ```
 
-本项目不自动读取 `.env` 文件；可以用 shell `export`、direnv、systemd environment 或容器环境注入。
+运行时默认读取当前目录下的 `config.yaml`，也可以在子命令前用 `--config` 指定其他路径：
+
+```bash
+go run ./cmd/pvsk --config /path/to/config.yaml migrate
+```
+
+`config.yaml` 使用 YAML 配置表，不再读取 `.env` 或环境变量。常用字段包括数据库 DSN、文件存储目录、LLM 兼容接口、HTTP timeout、爬取限速和下载大小上限，完整示例见 `config.example.yaml`。
 
 ## Commands
 
@@ -50,32 +54,33 @@ export PVSK_STORAGE_ROOT='/home/rocky/HDDdata/perovskite_papers'
 
 ```bash
 go mod download
-go run ./cmd/pvsk migrate
+go run ./cmd/pvsk --config config.yaml migrate
 ```
 
 爬取公开元数据：
 
 ```bash
-go run ./cmd/pvsk crawl --query "FA Pb I3 perovskite solar cell" --limit 20
-go run ./cmd/pvsk crawl --query "Cs Pb I2 Br wide bandgap perovskite solar cell" --limit 20
-go run ./cmd/pvsk crawl --query "FA0.85 MA0.15 Pb I2.55 Br0.45 perovskite solar cell" --limit 20
-go run ./cmd/pvsk crawl --query "FA Sn I3 perovskite solar cell" --limit 20
+go run ./cmd/pvsk --config config.yaml crawl --query "FA Pb I3 perovskite solar cell" --limit 20
+go run ./cmd/pvsk --config config.yaml crawl --query "Cs Pb I2 Br wide bandgap perovskite solar cell" --limit 20
+go run ./cmd/pvsk --config config.yaml crawl --query "FA0.85 MA0.15 Pb I2.55 Br0.45 perovskite solar cell" --limit 20
+go run ./cmd/pvsk --config config.yaml crawl --query "FA Sn I3 perovskite solar cell" --limit 20
 ```
 
 分类：
 
 ```bash
-go run ./cmd/pvsk classify --limit 20
+go run ./cmd/pvsk --config config.yaml classify --limit 20
 ```
 
-如需启用 LLM：
+如需启用 LLM，在 `config.yaml` 中填写：
 
-```bash
-export LLM_PROVIDER=openai_or_compatible
-export LLM_BASE_URL=https://api.openai.com/v1
-export LLM_API_KEY='...'
-export LLM_MODEL=gpt-5-mini
-go run ./cmd/pvsk classify --limit 20
+```yaml
+llm:
+  provider: openai_or_compatible
+  base_url: https://api.openai.com/v1
+  api_key: ...
+  model: gpt-5-mini
+  timeout_seconds: 60
 ```
 
 没有 API key 时不会崩溃，会使用 rule-based fallback 并记录跳过原因。
@@ -83,13 +88,21 @@ go run ./cmd/pvsk classify --limit 20
 下载开放获取资产：
 
 ```bash
-go run ./cmd/pvsk download --limit 20
+go run ./cmd/pvsk --config config.yaml download --limit 20
 ```
+
+合并 `data2` 格式的数据：
+
+```bash
+go run ./cmd/pvsk --config config.yaml merge-data2 --file ../data2_progress.xlsx
+```
+
+`merge-data2` 支持 `.xlsx` 和 `.csv`。导入时按 DOI 匹配或创建 `papers`，按 `perovskite_composition` 合并 `materials`/`compositions`，把 `solar_cell_structure` 和 `additive_abbreviation` 合并为 `devices.stack`，并把 `pce_after` 写入 `measurements.pce`；`pce_before`、PCE delta、CAS、PubChem、SMILES、分子式和原始行会保存在 JSON metadata 中。重复运行会更新同一 DOI + 材料 + 结构/添加剂组合的记录。
 
 启动查询服务：
 
 ```bash
-go run ./cmd/pvsk serve --addr ":8080"
+go run ./cmd/pvsk --config config.yaml serve --addr ":8080"
 ```
 
 API：
@@ -112,7 +125,7 @@ GET /
 ## 查看数据库
 
 ```bash
-psql "$DATABASE_DSN"
+psql "postgres://pvsk_app:password@127.0.0.1:5432/pvsk_db?sslmode=disable"
 \dt
 select doi,title,year,download_status from papers order by created_at desc limit 10;
 select p.doi, mc.code, pmc.confidence, pmc.assigned_by
@@ -152,7 +165,7 @@ env GOCACHE=/tmp/go-cache go build -buildvcs=false ./...
 - 已实现 Crossref source；OpenAlex、Semantic Scholar、Unpaywall、本地 JSON/CSV 导入已有接口位置，尚未实现。
 - Crossref 的 PDF link 覆盖率有限；建议后续加入 Unpaywall 获取 OA location。
 - 目前下载主 PDF/HTML/XML 资产；supplementary routing 可复用现有 Python `data_crawl_pdf_llm_code/scripts/si_download_lib.py` 的设计迁移。
-- materials 层只预留基础表，尚未从全文抽取 PCE、Voc、Jsc、FF、bandgap、制备条件。
+- materials 层已经支持从 `data2` 表合并材料、器件和 PCE；尚未从全文自动抽取 Voc、Jsc、FF、bandgap、制备条件。
 
 ## Future Extension
 

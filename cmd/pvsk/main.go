@@ -7,11 +7,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"pvsk-pipeline/internal/classify"
 	"pvsk-pipeline/internal/config"
 	"pvsk-pipeline/internal/crawler"
+	"pvsk-pipeline/internal/data2"
 	"pvsk-pipeline/internal/db"
 	"pvsk-pipeline/internal/download"
 	"pvsk-pipeline/internal/llm"
@@ -26,18 +28,24 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-	cfg := config.Load()
-	switch os.Args[1] {
+	configPath, command, args := parseGlobalArgs(os.Args[1:])
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("load config %s: %v", configPath, err)
+	}
+	switch command {
 	case "migrate":
 		mustMigrate(cfg)
 	case "crawl":
-		mustCrawl(cfg, os.Args[2:])
+		mustCrawl(cfg, args)
 	case "classify":
-		mustClassify(cfg, os.Args[2:])
+		mustClassify(cfg, args)
 	case "download":
-		mustDownload(cfg, os.Args[2:])
+		mustDownload(cfg, args)
+	case "merge-data2":
+		mustMergeData2(cfg, args)
 	case "serve":
-		mustServe(cfg, os.Args[2:])
+		mustServe(cfg, args)
 	default:
 		usage()
 		os.Exit(2)
@@ -46,11 +54,29 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `Usage:
-  go run ./cmd/pvsk migrate
-  go run ./cmd/pvsk crawl --query "FA Pb I3 perovskite solar cell" --limit 50
-  go run ./cmd/pvsk classify --limit 100
-  go run ./cmd/pvsk download --limit 100
-  go run ./cmd/pvsk serve --addr ":8080"`)
+  go run ./cmd/pvsk [--config config.yaml] migrate
+  go run ./cmd/pvsk [--config config.yaml] crawl --query "FA Pb I3 perovskite solar cell" --limit 50
+  go run ./cmd/pvsk [--config config.yaml] classify --limit 100
+  go run ./cmd/pvsk [--config config.yaml] download --limit 100
+  go run ./cmd/pvsk [--config config.yaml] merge-data2 --file ../data2_progress.xlsx
+  go run ./cmd/pvsk [--config config.yaml] serve --addr ":8080"`)
+}
+
+func parseGlobalArgs(args []string) (string, string, []string) {
+	configPath := "config.yaml"
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--config" && len(args) > 1:
+			configPath = args[1]
+			args = args[2:]
+		case strings.HasPrefix(args[0], "--config="):
+			configPath = strings.TrimPrefix(args[0], "--config=")
+			args = args[1:]
+		default:
+			return configPath, args[0], args[1:]
+		}
+	}
+	return configPath, "", nil
 }
 
 func mustMigrate(cfg config.Config) {
@@ -135,6 +161,26 @@ func mustDownload(cfg config.Config, args []string) {
 		log.Fatalf("download failed: %v", err)
 	}
 	log.Printf("download complete")
+}
+
+func mustMergeData2(cfg config.Config, args []string) {
+	fs := flag.NewFlagSet("merge-data2", flag.ExitOnError)
+	filePath := fs.String("file", "", "data2 xlsx/csv file")
+	_ = fs.Parse(args)
+	if *filePath == "" {
+		log.Fatal("--file is required")
+	}
+	gdb, err := db.Open(cfg.DatabaseDSN)
+	if err != nil {
+		log.Fatalf("open database: %v", err)
+	}
+	summary, err := data2.ImportFile(gdb, *filePath)
+	if err != nil {
+		log.Fatalf("merge data2: %v", err)
+	}
+	log.Printf("merge data2 complete: rows=%d skipped=%d papers inserted=%d matched=%d materials inserted=%d matched=%d devices inserted=%d matched=%d measurements inserted=%d updated=%d",
+		summary.Rows, summary.Skipped, summary.PapersInserted, summary.PapersMatched, summary.MaterialsInserted, summary.MaterialsMatched,
+		summary.DevicesInserted, summary.DevicesMatched, summary.MeasurementsInserted, summary.MeasurementsUpdated)
 }
 
 func mustServe(cfg config.Config, args []string) {

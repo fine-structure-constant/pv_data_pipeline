@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
+// Paper represents a discovered scholarly work and its lifecycle metadata in the pipeline.
 type Paper struct {
 	ID               string               `gorm:"type:uuid;primaryKey" json:"id"`
 	DOI              string               `gorm:"uniqueIndex;size:512" json:"doi"`
@@ -31,6 +32,7 @@ type Paper struct {
 	UpdatedAt        time.Time            `json:"updated_at"`
 }
 
+// BeforeCreate ensures a paper gets a UUID before being persisted.
 func (p *Paper) BeforeCreate(tx *gorm.DB) error {
 	if p.ID == "" {
 		p.ID = uuid.NewString()
@@ -38,6 +40,7 @@ func (p *Paper) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// PaperAsset stores the downloaded or discovered artifact associated with a paper.
 type PaperAsset struct {
 	ID           string     `gorm:"type:uuid;primaryKey" json:"id"`
 	PaperID      string     `gorm:"type:uuid;index;not null" json:"paper_id"`
@@ -55,6 +58,7 @@ type PaperAsset struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
+// BeforeCreate ensures a paper asset receives a UUID before insertion.
 func (a *PaperAsset) BeforeCreate(tx *gorm.DB) error {
 	if a.ID == "" {
 		a.ID = uuid.NewString()
@@ -62,6 +66,7 @@ func (a *PaperAsset) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// MaterialClass groups papers into high-level material family labels.
 type MaterialClass struct {
 	ID          string    `gorm:"type:uuid;primaryKey" json:"id"`
 	Code        string    `gorm:"uniqueIndex;not null" json:"code"`
@@ -70,6 +75,7 @@ type MaterialClass struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// BeforeCreate ensures a material class gets a UUID when created.
 func (m *MaterialClass) BeforeCreate(tx *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.NewString()
@@ -77,6 +83,7 @@ func (m *MaterialClass) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// PaperMaterialClass records the link between a paper and a material-class assignment.
 type PaperMaterialClass struct {
 	ID              string        `gorm:"type:uuid;primaryKey" json:"id"`
 	PaperID         string        `gorm:"type:uuid;uniqueIndex:idx_paper_class_source;not null" json:"paper_id"`
@@ -89,6 +96,7 @@ type PaperMaterialClass struct {
 	CreatedAt       time.Time     `json:"created_at"`
 }
 
+// BeforeCreate ensures a paper-class assignment receives an identifier before insert.
 func (p *PaperMaterialClass) BeforeCreate(tx *gorm.DB) error {
 	if p.ID == "" {
 		p.ID = uuid.NewString()
@@ -96,6 +104,7 @@ func (p *PaperMaterialClass) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// LLMClassification stores the raw and parsed output of an LLM classification request.
 type LLMClassification struct {
 	ID            string         `gorm:"type:uuid;primaryKey" json:"id"`
 	PaperID       string         `gorm:"type:uuid;index;not null" json:"paper_id"`
@@ -112,6 +121,7 @@ type LLMClassification struct {
 	CreatedAt     time.Time      `json:"created_at"`
 }
 
+// BeforeCreate ensures an LLM classification record gets a UUID before persistence.
 func (l *LLMClassification) BeforeCreate(tx *gorm.DB) error {
 	if l.ID == "" {
 		l.ID = uuid.NewString()
@@ -119,6 +129,7 @@ func (l *LLMClassification) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// CrawlJob tracks a batch crawl operation and its aggregate statistics.
 type CrawlJob struct {
 	ID           string     `gorm:"type:uuid;primaryKey" json:"id"`
 	Query        string     `gorm:"type:text" json:"query"`
@@ -134,6 +145,7 @@ type CrawlJob struct {
 	Logs         []CrawlLog `json:"logs,omitempty"`
 }
 
+// BeforeCreate ensures a crawl job gets a UUID before being recorded.
 func (c *CrawlJob) BeforeCreate(tx *gorm.DB) error {
 	if c.ID == "" {
 		c.ID = uuid.NewString()
@@ -141,6 +153,7 @@ func (c *CrawlJob) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// CrawlLog stores individual log entries emitted during a crawl job.
 type CrawlLog struct {
 	ID         string    `gorm:"type:uuid;primaryKey" json:"id"`
 	CrawlJobID string    `gorm:"type:uuid;index" json:"crawl_job_id"`
@@ -150,6 +163,7 @@ type CrawlLog struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// BeforeCreate ensures a crawl log entry acquires a UUID before insertion.
 func (c *CrawlLog) BeforeCreate(tx *gorm.DB) error {
 	if c.ID == "" {
 		c.ID = uuid.NewString()
@@ -157,6 +171,7 @@ func (c *CrawlLog) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Material represents a chemical or device material concept linked to papers.
 type Material struct {
 	ID        string    `gorm:"type:uuid;primaryKey" json:"id"`
 	Name      string    `gorm:"index" json:"name"`
@@ -166,6 +181,7 @@ type Material struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// BeforeCreate ensures a material record gets a UUID before persistence.
 func (m *Material) BeforeCreate(tx *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.NewString()
@@ -173,6 +189,7 @@ func (m *Material) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Composition captures the formula and normalized composition of a material entry.
 type Composition struct {
 	ID          string         `gorm:"type:uuid;primaryKey" json:"id"`
 	MaterialID  string         `gorm:"type:uuid;index" json:"material_id"`
@@ -182,6 +199,7 @@ type Composition struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
+// BeforeCreate ensures a composition record gets a UUID before insertion.
 func (c *Composition) BeforeCreate(tx *gorm.DB) error {
 	if c.ID == "" {
 		c.ID = uuid.NewString()
@@ -189,6 +207,7 @@ func (c *Composition) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Structure describes a structural phase associated with a material.
 type Structure struct {
 	ID         string         `gorm:"type:uuid;primaryKey" json:"id"`
 	MaterialID string         `gorm:"type:uuid;index" json:"material_id"`
@@ -197,6 +216,7 @@ type Structure struct {
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
+// BeforeCreate ensures a structure record receives a UUID before persistence.
 func (s *Structure) BeforeCreate(tx *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.NewString()
@@ -204,6 +224,7 @@ func (s *Structure) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Device represents a device stack connected to a paper and material.
 type Device struct {
 	ID         string         `gorm:"type:uuid;primaryKey" json:"id"`
 	MaterialID string         `gorm:"type:uuid;index" json:"material_id"`
@@ -213,6 +234,7 @@ type Device struct {
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
+// BeforeCreate ensures a device record gets a UUID before insertion.
 func (d *Device) BeforeCreate(tx *gorm.DB) error {
 	if d.ID == "" {
 		d.ID = uuid.NewString()
@@ -220,6 +242,7 @@ func (d *Device) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// Measurement stores performance metrics captured for a device in a paper.
 type Measurement struct {
 	ID        string         `gorm:"type:uuid;primaryKey" json:"id"`
 	DeviceID  string         `gorm:"type:uuid;index" json:"device_id"`
@@ -233,6 +256,7 @@ type Measurement struct {
 	CreatedAt time.Time      `json:"created_at"`
 }
 
+// BeforeCreate ensures a measurement record gets a UUID before persistence.
 func (m *Measurement) BeforeCreate(tx *gorm.DB) error {
 	if m.ID == "" {
 		m.ID = uuid.NewString()

@@ -1,0 +1,22 @@
+database:
+  dsn: postgres://pvsk_app:password@127.0.0.1:5432/pvsk_db?sslmode=disable
+
+storage:
+  root: /home/rocky/HDDdata/perovskite_papers
+
+llm:
+  provider: ""
+  base_url: https://api.openai.com/v1
+  api_key: ""
+  model: gpt-5-mini
+  timeout_seconds: 60
+
+http:
+  user_agent: PvskCrawler/0.1 contact@example.com
+  request_timeout_seconds: 30
+
+crawl:
+  rate_limit_ms: 1000
+
+download:
+  max_bytes: 83886080
