@@ -28,6 +28,8 @@ crawl:
   rate_limit_ms: 250
 download:
   max_bytes: 12345
+web:
+  addr: ":9090"
 `)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
@@ -51,6 +53,9 @@ download:
 	if cfg.DownloadMaxBytes != 12345 {
 		t.Fatalf("unexpected max bytes: %d", cfg.DownloadMaxBytes)
 	}
+	if cfg.WebAddr != ":9090" {
+		t.Fatalf("unexpected web addr: %s", cfg.WebAddr)
+	}
 }
 
 func TestLoadMissingConfigUsesDefaults(t *testing.T) {
@@ -58,7 +63,7 @@ func TestLoadMissingConfigUsesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DatabaseDSN == "" || cfg.LLMModel == "" || cfg.RequestTimeout == 0 {
+	if cfg.DatabaseDSN == "" || cfg.LLMModel == "" || cfg.RequestTimeout == 0 || cfg.WebAddr == "" {
 		t.Fatalf("defaults not applied: %#v", cfg)
 	}
 }

@@ -185,7 +185,7 @@ func mustMergeData2(cfg config.Config, args []string) {
 
 func mustServe(cfg config.Config, args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", ":8080", "listen address")
+	addr := fs.String("addr", cfg.WebAddr, "listen address")
 	_ = fs.Parse(args)
 	gdb, err := db.Open(cfg.DatabaseDSN)
 	if err != nil {

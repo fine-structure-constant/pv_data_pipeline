@@ -105,6 +105,13 @@ go run ./cmd/pvsk --config config.yaml merge-data2 --file ../data2_progress.xlsx
 go run ./cmd/pvsk --config config.yaml serve --addr ":8080"
 ```
 
+Web 监听地址也可以写在配置文件中；命令行 `--addr` 会覆盖配置值：
+
+```yaml
+web:
+  addr: ":8080"
+```
+
 API：
 
 ```text
@@ -116,7 +123,13 @@ GET /papers?query=wide-bandgap
 GET /papers?download_status=open_access_downloaded
 GET /assets/{id}
 GET /
+GET /api/tables
+GET /api/tables/{table}
+GET /download/tables/{table}.json
+GET /download/imported-data2.json
 ```
+
+打开 `/` 会进入 Web UI：左侧列出所有业务表，右侧以表格方式展示数据，支持关键词搜索、行数限制和当前表 JSON 下载。`/download/imported-data2.json` 会把 `merge-data2` 导入的 `source_api=data2` 记录打包为 JSON，包含 paper、materials、devices 和 measurements，可在 UI 中一键下载。
 
 ## Prompt
 
