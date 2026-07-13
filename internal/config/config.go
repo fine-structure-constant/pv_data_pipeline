@@ -23,6 +23,7 @@ type Config struct {
 	RequestTimeout   time.Duration
 	LLMTimeout       time.Duration
 	DownloadMaxBytes int64
+	WebAddr          string
 }
 
 type fileConfig struct {
@@ -49,6 +50,9 @@ type fileConfig struct {
 	Download struct {
 		MaxBytes int64 `yaml:"max_bytes"`
 	} `yaml:"download"`
+	Web struct {
+		Addr string `yaml:"addr"`
+	} `yaml:"web"`
 }
 
 // Load reads a YAML configuration file and returns the application's effective configuration.
@@ -81,6 +85,7 @@ func Defaults() Config {
 		RequestTimeout:   30 * time.Second,
 		LLMTimeout:       60 * time.Second,
 		DownloadMaxBytes: 80 * 1024 * 1024,
+		WebAddr:          ":8080",
 	}
 }
 
@@ -117,6 +122,9 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	}
 	if fc.Download.MaxBytes > 0 {
 		cfg.DownloadMaxBytes = fc.Download.MaxBytes
+	}
+	if fc.Web.Addr != "" {
+		cfg.WebAddr = fc.Web.Addr
 	}
 }
 
@@ -217,6 +225,8 @@ func assignValue(fc *fileConfig, section, key, value string, lineNo int) error {
 			return err
 		}
 		fc.Download.MaxBytes = n
+	case "web.addr":
+		fc.Web.Addr = value
 	}
 	return nil
 }

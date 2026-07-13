@@ -20,3 +20,6 @@ crawl:
 
 download:
   max_bytes: 83886080
+
+web:
+  addr: ":8080"
