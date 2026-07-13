@@ -1,111 +1,114 @@
-# Perovskite Solar Cell Literature Pipeline
+# 钙钛矿文献爬取与数据提取
 
-这个 Go 项目用于构建钙钛矿太阳能电池文献目录库，第一阶段聚焦“文献发现 + 元数据入库 + 合规开放获取下载 + LLM/规则分类 + 查询 API”。现有 `data_crawl_pdf_llm_code/` Python PDF/SI/LLM 抽取代码已保留不动，可作为后续全文解析和性能数据抽取链路。
+这是一个 Go + PostgreSQL 文献管线。Crossref 负责发现文献，DeepSeek 负责理解论文元数据并提取钙钛矿组分；程序支持模糊正向/反向关键词、按目标数量分页补足、去重入库及可选学术联网检索。现有 `serve` 路由和 JSON 数据格式保持兼容。
 
-重点优先收集非纯 `MAPbI3` 中心体系，例如 FA-rich、Cs-containing、I/Br mixed、Sn-based、wide-bandgap、mixed-cation、mixed-halide perovskites。出现 `MAPbI3` 不会被简单排除，只有纯 baseline 才会标记为 `MAPBI3_BASELINE`。
-
-## Database Design
-
-数据库按层分离：
-
-- literature 层：`papers`、`paper_assets`、`material_classes`、`paper_material_classes`、`llm_classifications`、`crawl_jobs`、`crawl_logs`
-- materials 层预留：`materials`、`compositions`、`structures`、`devices`、`measurements`
-
-`paper_material_classes` 是多标签关联表，一篇论文可以同时属于 `FA_RICH`、`CS_CONTAINING`、`MIXED_HALIDE`、`WIDE_BANDGAP` 等类别。文件存储不按材料类别分目录，而是按 paper UUID：
+## 项目结构
 
 ```text
-/home/rocky/HDDdata/perovskite_papers/{paper_uuid}/
-  metadata.json
-  paper.pdf
-  fulltext.html
-  supplementary/
+cmd/pvsk/                 CLI 入口：migrate、crawl、classify、download、serve
+internal/crawler/         补足目标数量、模糊正/反向筛选、入库
+internal/sources/         文献源接口与 Crossref 分页适配器
+internal/classify/        规则分类、LLM 调用与组分持久化
+internal/llm/             DeepSeek/OpenAI 兼容 API 与可选 web_search 工具
+internal/models/          papers、materials、compositions 等数据库模型
+internal/server/          原有网页和只读 JSON API
+internal/download/        合规下载公开可访问资产
+internal/data2/           既有 xlsx/csv 数据导入
+prompts/                  LLM 提取提示词
+config.example.yaml       配置模板
 ```
 
-`paper_assets` 记录真实路径、source URL、sha256、MIME type、license、access type 和下载错误。
+## 配置与初始化
 
-## PostgreSQL Setup
-
-示例：
-
-```bash
-createuser pvsk_app
-createdb pvsk_db
-psql -d pvsk_db -c "ALTER DATABASE pvsk_db OWNER TO pvsk_app;"
-psql -d pvsk_db -c "ALTER USER pvsk_app WITH PASSWORD 'password';"
-```
-
-配置文件：
+需要 Go 1.22+ 和 PostgreSQL。复制配置后填写数据库 DSN：
 
 ```bash
 cp config.example.yaml config.yaml
-```
-
-运行时默认读取当前目录下的 `config.yaml`，也可以在子命令前用 `--config` 指定其他路径：
-
-```bash
-go run ./cmd/pvsk --config /path/to/config.yaml migrate
-```
-
-`config.yaml` 使用 YAML 配置表，不再读取 `.env` 或环境变量。常用字段包括数据库 DSN、文件存储目录、LLM 兼容接口、HTTP timeout、爬取限速和下载大小上限，完整示例见 `config.example.yaml`。
-
-## Commands
-
-安装依赖后迁移：
-
-```bash
 go mod download
 go run ./cmd/pvsk --config config.yaml migrate
 ```
 
-爬取公开元数据：
-
-```bash
-go run ./cmd/pvsk --config config.yaml crawl --query "FA Pb I3 perovskite solar cell" --limit 20
-go run ./cmd/pvsk --config config.yaml crawl --query "Cs Pb I2 Br wide bandgap perovskite solar cell" --limit 20
-go run ./cmd/pvsk --config config.yaml crawl --query "FA0.85 MA0.15 Pb I2.55 Br0.45 perovskite solar cell" --limit 20
-go run ./cmd/pvsk --config config.yaml crawl --query "FA Sn I3 perovskite solar cell" --limit 20
-```
-
-分类：
-
-```bash
-go run ./cmd/pvsk --config config.yaml classify --limit 20
-```
-
-如需启用 LLM，在 `config.yaml` 中填写：
+DeepSeek 使用 OpenAI 兼容接口：
 
 ```yaml
 llm:
-  provider: openai_or_compatible
-  base_url: https://api.openai.com/v1
-  api_key: ...
-  model: gpt-5-mini
+  provider: deepseek
+  base_url: https://api.deepseek.com
+  api_key: "YOUR_DEEPSEEK_API_KEY"
+  model: deepseek-chat  # 也可以填写账户实际支持的其他模型
   timeout_seconds: 60
+  enable_web_search: false
 ```
 
-没有 API key 时不会崩溃，会使用 rule-based fallback 并记录跳过原因。
+`config.yaml` 已被 `.gitignore` 忽略，可以保留本地测试 key，但不要把真实 key 写入 `config.example.yaml` 或提交到 Git。
 
-下载开放获取资产：
+### DeepSeek 联网工具
+
+DeepSeek API 本身用于模型推理；项目通过 function calling 为它提供 `web_search`：
+
+```text
+论文标题/摘要 → DeepSeek
+                  ├─ 信息充分：直接输出结构化 JSON
+                  └─ 信息不足：调用 web_search
+                                   ↓
+                              Crossref 检索
+                                   ↓
+                    精简为最多 5 条 DOI/标题/摘要
+                                   ↓
+                         回传 DeepSeek 完成提取
+```
+
+工具最多进行 3 轮调用，单条摘要最多保留 1200 字符，避免原始 Crossref 响应挤占模型上下文。它只搜索学术元数据，不是通用网页浏览器，也不下载或绕过付费全文。设置 `enable_web_search: false` 可完全禁止模型调用该工具。
+
+## 爬取和提取
+
+`--limit` 表示最终接受的记录数，不是 Crossref 候选数。程序会分页补足，并过滤 Supporting Information DOI 和非论文记录。
 
 ```bash
-go run ./cmd/pvsk --config config.yaml download --limit 20
+# 目标：500 条包含 FAPbI3、排除任何提及 MAPbI3 的论文，并立即提取
+go run ./cmd/pvsk --config config.yaml crawl \
+  --query "FAPbI3 perovskite solar cell" \
+  --include "FAPbI3" \
+  --exclude "MAPbI3" \
+  --limit 500 \
+  --candidate-factor 20 \
+  --extract
 ```
 
-合并 `data2` 格式的数据：
+`--include` 与 `--exclude` 都支持逗号分隔；所有 include 必须匹配，任一 exclude 匹配即拒绝。匹配忽略大小写、空格和标点，例如 `FAPbI3` 可以匹配 `FA PbI3`。反向条件优先。
+
+注意：`--exclude MAPbI3` 会排除“研究 FAPbI3 但摘要拿 MAPbI3 作对比”的文章。如果目标只是排除“纯 MAPbI3 体系”，不要传该反向词；爬取后使用 `MAPBI3_BASELINE` / `NOT_MA_PB_I3` 分类标签筛选更准确：
 
 ```bash
-go run ./cmd/pvsk --config config.yaml merge-data2 --file ../data2_progress.xlsx
+go run ./cmd/pvsk --config config.yaml crawl \
+  --query "halide perovskite solar cell" \
+  --include "perovskite,solar cell" \
+  --limit 500 --candidate-factor 20 --extract
 ```
 
-`merge-data2` 支持 `.xlsx` 和 `.csv`。导入时按 DOI 匹配或创建 `papers`，按 `perovskite_composition` 合并 `materials`/`compositions`，把 `solar_cell_structure` 和 `additive_abbreviation` 合并为 `devices.stack`，并把 `pce_after` 写入 `measurements.pce`；`pce_before`、PCE delta、CAS、PubChem、SMILES、分子式和原始行会保存在 JSON metadata 中。重复运行会更新同一 DOI + 材料 + 结构/添加剂组合的记录。
+候选过少时提高 `--candidate-factor`。不带 `--extract` 时可稍后执行：
 
-启动查询服务：
+```bash
+go run ./cmd/pvsk --config config.yaml classify --limit 500
+```
+
+有 API key 时，`detected_compositions` 会写入 `materials`、`compositions` 和 `paper_materials`；没有 key 时只执行规则分类，不会伪造结构化组分。
+
+单独验证 DeepSeek 提取：
+
+```bash
+go run ./cmd/pvsk --config config.yaml classify --limit 1
+```
+
+项目已用真实 DeepSeek 请求验证普通分类和开启 `web_search` 后的工具声明；自动化测试还覆盖了完整的 tool-call 往返协议。模型只有在认为元数据不足时才会实际发起搜索，并非每篇论文都会调用。
+
+## Serve 与读取 API
 
 ```bash
 go run ./cmd/pvsk --config config.yaml serve --addr ":8080"
 ```
 
-API：
+保留的接口：
 
 ```text
 GET /healthz
@@ -114,64 +117,30 @@ GET /papers/{id}
 GET /papers?tag=FA_PB_I3
 GET /papers?query=wide-bandgap
 GET /papers?download_status=open_access_downloaded
+GET /papers?year=2025
 GET /assets/{id}
 GET /
 ```
 
-## Prompt
-
-分类 prompt 位于 `prompts/classify_paper.md`，要求模型只输出 JSON。原始响应和解析后的 JSON 会写入 `llm_classifications`，解析失败不会中断 pipeline。
-
-## 查看数据库
+其他命令：
 
 ```bash
-psql "postgres://pvsk_app:password@127.0.0.1:5432/pvsk_db?sslmode=disable"
-\dt
-select doi,title,year,download_status from papers order by created_at desc limit 10;
-select p.doi, mc.code, pmc.confidence, pmc.assigned_by
-from paper_material_classes pmc
-join papers p on p.id = pmc.paper_id
-join material_classes mc on mc.id = pmc.material_class_id
-order by pmc.created_at desc
-limit 20;
+go run ./cmd/pvsk --config config.yaml download --limit 100
+go run ./cmd/pvsk --config config.yaml merge-data2 --file data.xlsx
 ```
 
-## 合规下载策略
+下载器仅使用元数据公开的链接，不绕过出版商权限控制。
 
-- 当前 source adapter 默认使用 Crossref 元数据 API。
-- 只下载元数据中暴露的 open-access link，不绕过出版社付费墙。
-- 失败写入 `paper_assets.error_message` 和 `papers.download_status`，不会中断整批任务。
-- HTTP 请求带 User-Agent、timeout、rate limit。
-- 不硬编码账号、API key、cookie 或 token。
-
-## Testing
-
-```bash
-go test ./...
-go build ./...
-```
-
-已有单元测试覆盖 DOI normalize、规则 tag mapping、LLM JSON parsing。
-
-如果当前工作目录不是完整 git 仓库，或者 Go cache 所在的 home 目录不可写，可用：
+## 测试
 
 ```bash
 env GOCACHE=/tmp/go-cache go test ./...
 env GOCACHE=/tmp/go-cache go build -buildvcs=false ./...
 ```
 
-## Current Limits / TODO
+早期测试产生过 SI 记录，可按 DOI 后缀检查，确认后再删除：
 
-- 已实现 Crossref source；OpenAlex、Semantic Scholar、Unpaywall、本地 JSON/CSV 导入已有接口位置，尚未实现。
-- Crossref 的 PDF link 覆盖率有限；建议后续加入 Unpaywall 获取 OA location。
-- 目前下载主 PDF/HTML/XML 资产；supplementary routing 可复用现有 Python `data_crawl_pdf_llm_code/scripts/si_download_lib.py` 的设计迁移。
-- materials 层已经支持从 `data2` 表合并材料、器件和 PCE；尚未从全文自动抽取 Voc、Jsc、FF、bandgap、制备条件。
-
-## Future Extension
-
-后续建议流程：
-
-1. 用现有 Python PDF/SI 解析链路或 GROBID/MinerU 把 `paper_assets.local_path` 转成正文文本。
-2. 新增 extraction worker，把结构、器件栈、制备条件和性能指标写入 `materials`、`compositions`、`devices`、`measurements`。
-3. 在 `sql/` 中增加稳定 SQL migration、视图和导出查询。
-4. 增加 `export` 命令，输出面向 AI 训练的 JSONL/Parquet：paper metadata、composition JSONB、device stack、measurement metrics、evidence text、source asset hash。
+```sql
+select id, doi, title from papers where doi ~* '\\.s[0-9]+$';
+-- delete from papers where doi ~* '\\.s[0-9]+$';
+```

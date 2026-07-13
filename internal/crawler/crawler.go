@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
+	"strings"
 	"time"
 
 	"pvsk-pipeline/internal/models"
@@ -21,43 +23,119 @@ type Service struct {
 	RateLimit time.Duration
 }
 
-func (s Service) Crawl(ctx context.Context, query string, limit int) (*models.CrawlJob, error) {
+type Options struct {
+	Query           string
+	Limit           int
+	Include         []string
+	Exclude         []string
+	CandidateFactor int
+}
+
+// Crawl keeps fetching candidate pages until Limit accepted records have been
+// stored or the source is exhausted. Limit therefore means accepted results.
+func (s Service) Crawl(ctx context.Context, opts Options) (*models.CrawlJob, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	if opts.CandidateFactor <= 0 {
+		opts.CandidateFactor = 8
+	}
 	job := &models.CrawlJob{
-		Query: query, Source: s.Source.Name(), Status: "running", StartedAt: time.Now().UTC(),
+		Query: describeQuery(opts), Source: s.Source.Name(), Status: "running", StartedAt: time.Now().UTC(),
 	}
 	if err := s.DB.Create(job).Error; err != nil {
 		return nil, err
 	}
-	candidates, err := s.Source.Search(ctx, query, limit)
-	if err != nil {
-		s.finish(job, "failed", err.Error())
-		return job, err
+	pageSize := opts.Limit * 2
+	if pageSize < 50 {
+		pageSize = 50
 	}
-	job.NumFound = len(candidates)
-	for _, c := range candidates {
-		select {
-		case <-ctx.Done():
-			s.finish(job, "failed", ctx.Err().Error())
-			return job, ctx.Err()
-		default:
+	if pageSize > 250 {
+		pageSize = 250
+	}
+	maxCandidates := opts.Limit * opts.CandidateFactor
+	accepted := 0
+	for offset := 0; offset < maxCandidates && accepted < opts.Limit; offset += pageSize {
+		want := pageSize
+		if remaining := maxCandidates - offset; want > remaining {
+			want = remaining
 		}
-		if s.RateLimit > 0 {
-			time.Sleep(s.RateLimit)
-		}
-		action, err := s.upsertCandidate(c)
+		candidates, err := s.Source.Search(ctx, sources.SearchOptions{Query: opts.Query, Limit: want, Offset: offset})
 		if err != nil {
-			job.NumFailed++
-			s.log(job.ID, "error", c.DOI, err.Error())
-			continue
+			s.finish(job, "failed", err.Error())
+			return job, err
 		}
-		if action == "inserted" {
-			job.NumInserted++
-		} else if action == "updated" {
-			job.NumUpdated++
+		job.NumFound += len(candidates)
+		for _, c := range candidates {
+			if accepted >= opts.Limit {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				s.finish(job, "failed", ctx.Err().Error())
+				return job, ctx.Err()
+			default:
+			}
+			if ok, reason := matches(c, opts.Include, opts.Exclude); !ok {
+				s.log(job.ID, "debug", c.DOI, "filtered: "+reason)
+				continue
+			}
+			if s.RateLimit > 0 {
+				time.Sleep(s.RateLimit)
+			}
+			action, err := s.upsertCandidate(c)
+			if err != nil {
+				job.NumFailed++
+				s.log(job.ID, "error", c.DOI, err.Error())
+				continue
+			}
+			if action == "inserted" {
+				job.NumInserted++
+			} else if action == "updated" {
+				job.NumUpdated++
+			}
+			accepted++
+		}
+		if len(candidates) < want {
+			break
 		}
 	}
 	s.finish(job, "done", "")
 	return job, s.DB.Save(job).Error
+}
+
+var nonWord = regexp.MustCompile(`[^a-z0-9]+`)
+var supplementaryDOI = regexp.MustCompile(`(?i)\.s\d+$`)
+
+func normalized(s string) string { return nonWord.ReplaceAllString(strings.ToLower(s), "") }
+
+func matches(c sources.PaperCandidate, includes, excludes []string) (bool, string) {
+	if supplementaryDOI.MatchString(c.DOI) {
+		return false, "supplementary-information DOI"
+	}
+	if c.Kind != "" && c.Kind != "journal-article" && c.Kind != "proceedings-article" && c.Kind != "posted-content" {
+		return false, "unsupported record type " + c.Kind
+	}
+	if strings.TrimSpace(c.Title) == "" {
+		return false, "missing title"
+	}
+	haystack := normalized(strings.Join(append([]string{c.Title, c.Abstract}, c.Keywords...), " "))
+	for _, term := range excludes {
+		if t := normalized(term); t != "" && strings.Contains(haystack, t) {
+			return false, "excluded by " + term
+		}
+	}
+	for _, term := range includes {
+		if t := normalized(term); t != "" && !strings.Contains(haystack, t) {
+			return false, "missing " + term
+		}
+	}
+	return true, ""
+}
+
+func describeQuery(opts Options) string {
+	b, _ := json.Marshal(map[string]any{"query": opts.Query, "include": opts.Include, "exclude": opts.Exclude, "limit": opts.Limit})
+	return string(b)
 }
 
 func (s Service) upsertCandidate(c sources.PaperCandidate) (string, error) {

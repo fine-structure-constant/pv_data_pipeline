@@ -28,6 +28,7 @@ type Paper struct {
 	LocalDir         string               `gorm:"type:text" json:"local_dir"`
 	Assets           []PaperAsset         `json:"assets,omitempty"`
 	Classes          []PaperMaterialClass `json:"classes,omitempty"`
+	Materials        []Material           `gorm:"many2many:paper_materials" json:"materials,omitempty"`
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 }

@@ -7,6 +7,8 @@ Do not reject a paper only because it mentions MAPbI3. Mark is_mapbi3_only true 
 
 Return only one JSON object. Do not return Markdown, comments, or prose.
 
+If the web_search tool is available, use it only when the supplied title and abstract are insufficient. Treat search results as supporting context; never invent a composition that is absent from the paper metadata or supporting search result.
+
 Allowed families:
 FA_PB_I3, CS_PB_I2_BR, FA_MA_PB_I_BR, FA_SN_I3, FA_RICH, CS_CONTAINING, SN_BASED, PB_BASED, MIXED_CATION, MIXED_HALIDE, I_BR_MIXED, WIDE_BANDGAP, LOW_DIMENSIONAL, THREE_D, NOT_MA_PB_I3, MAPBI3_BASELINE, IRRELEVANT
 

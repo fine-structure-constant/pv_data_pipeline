@@ -28,17 +28,19 @@ func NewCrossref(client *http.Client, userAgent string) *CrossrefSource {
 
 func (s *CrossrefSource) Name() string { return "crossref" }
 
-func (s *CrossrefSource) Search(ctx context.Context, query string, limit int) ([]PaperCandidate, error) {
-	if limit <= 0 {
-		limit = 20
+func (s *CrossrefSource) Search(ctx context.Context, opts SearchOptions) ([]PaperCandidate, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 20
 	}
 	u, err := url.Parse(s.BaseURL)
 	if err != nil {
 		return nil, err
 	}
 	q := u.Query()
-	q.Set("query.bibliographic", query)
-	q.Set("rows", fmt.Sprintf("%d", limit))
+	q.Set("query.bibliographic", opts.Query)
+	q.Set("rows", fmt.Sprintf("%d", opts.Limit))
+	q.Set("offset", fmt.Sprintf("%d", opts.Offset))
+	q.Set("filter", "type:journal-article")
 	q.Set("select", "DOI,title,abstract,container-title,published-print,published-online,published,author,URL,link,license,subject,issued")
 	u.RawQuery = q.Encode()
 
@@ -76,6 +78,7 @@ func (s *CrossrefSource) Search(ctx context.Context, query string, limit int) ([
 			RawMetadata: raw,
 			Keywords:    item.Subject,
 			License:     firstLicense(item.License),
+			Kind:        item.Type,
 		}
 		if t := dateFromParts(item.PublishedOnline.DateParts); t != nil {
 			pc.PublishedDate = t
@@ -129,6 +132,7 @@ type crossrefItem struct {
 	Link            []crossrefLink    `json:"link"`
 	License         []crossrefLicense `json:"license"`
 	Subject         []string          `json:"subject"`
+	Type            string            `json:"type"`
 }
 
 type crossrefDate struct {

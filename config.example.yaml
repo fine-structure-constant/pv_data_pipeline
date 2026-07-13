@@ -5,11 +5,12 @@ storage:
   root: /home/rocky/HDDdata/perovskite_papers
 
 llm:
-  provider: ""
-  base_url: https://api.openai.com/v1
+  provider: deepseek
+  base_url: https://api.deepseek.com
   api_key: ""
-  model: gpt-5-mini
+  model: deepseek-chat
   timeout_seconds: 60
+  enable_web_search: false
 
 http:
   user_agent: PvskCrawler/0.1 contact@example.com

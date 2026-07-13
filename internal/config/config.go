@@ -22,6 +22,7 @@ type Config struct {
 	CrawlRateLimit   time.Duration
 	RequestTimeout   time.Duration
 	LLMTimeout       time.Duration
+	LLMWebSearch     bool
 	DownloadMaxBytes int64
 }
 
@@ -33,11 +34,12 @@ type fileConfig struct {
 		Root string `yaml:"root"`
 	} `yaml:"storage"`
 	LLM struct {
-		Provider       string `yaml:"provider"`
-		BaseURL        string `yaml:"base_url"`
-		APIKey         string `yaml:"api_key"`
-		Model          string `yaml:"model"`
-		TimeoutSeconds int    `yaml:"timeout_seconds"`
+		Provider        string `yaml:"provider"`
+		BaseURL         string `yaml:"base_url"`
+		APIKey          string `yaml:"api_key"`
+		Model           string `yaml:"model"`
+		TimeoutSeconds  int    `yaml:"timeout_seconds"`
+		EnableWebSearch bool   `yaml:"enable_web_search"`
 	} `yaml:"llm"`
 	HTTP struct {
 		UserAgent             string `yaml:"user_agent"`
@@ -106,6 +108,7 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	if fc.LLM.TimeoutSeconds > 0 {
 		cfg.LLMTimeout = time.Duration(fc.LLM.TimeoutSeconds) * time.Second
 	}
+	cfg.LLMWebSearch = fc.LLM.EnableWebSearch
 	if fc.HTTP.UserAgent != "" {
 		cfg.HTTPUserAgent = fc.HTTP.UserAgent
 	}
@@ -197,6 +200,12 @@ func assignValue(fc *fileConfig, section, key, value string, lineNo int) error {
 			return err
 		}
 		fc.LLM.TimeoutSeconds = n
+	case "llm.enable_web_search":
+		v, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("line %d: expected boolean, got %q", lineNo, value)
+		}
+		fc.LLM.EnableWebSearch = v
 	case "http.user_agent":
 		fc.HTTP.UserAgent = value
 	case "http.request_timeout_seconds":

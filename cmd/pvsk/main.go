@@ -55,7 +55,7 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, `Usage:
   go run ./cmd/pvsk [--config config.yaml] migrate
-  go run ./cmd/pvsk [--config config.yaml] crawl --query "FA Pb I3 perovskite solar cell" --limit 50
+  go run ./cmd/pvsk [--config config.yaml] crawl --query "perovskite solar cell" --include FAPbI3 --exclude MAPbI3 --limit 50 --extract
   go run ./cmd/pvsk [--config config.yaml] classify --limit 100
   go run ./cmd/pvsk [--config config.yaml] download --limit 100
   go run ./cmd/pvsk [--config config.yaml] merge-data2 --file ../data2_progress.xlsx
@@ -94,6 +94,11 @@ func mustCrawl(cfg config.Config, args []string) {
 	fs := flag.NewFlagSet("crawl", flag.ExitOnError)
 	query := fs.String("query", "", "search query")
 	limit := fs.Int("limit", 50, "max results")
+	include := fs.String("include", "", "comma-separated required fuzzy terms")
+	exclude := fs.String("exclude", "", "comma-separated rejected fuzzy terms")
+	candidateFactor := fs.Int("candidate-factor", 8, "maximum candidates examined per accepted result")
+	extract := fs.Bool("extract", false, "classify and extract accepted pending papers after crawling")
+	promptPath := fs.String("prompt", "prompts/classify_paper.md", "extraction prompt")
 	sourceName := fs.String("source", "crossref", "literature source")
 	_ = fs.Parse(args)
 	if *query == "" {
@@ -113,11 +118,32 @@ func mustCrawl(cfg config.Config, args []string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.RequestTimeout+time.Duration(*limit)*cfg.CrawlRateLimit+2*time.Minute)
 	defer cancel()
-	job, err := crawler.Service{DB: gdb, Source: source, RateLimit: cfg.CrawlRateLimit}.Crawl(ctx, *query, *limit)
+	job, err := crawler.Service{DB: gdb, Source: source, RateLimit: cfg.CrawlRateLimit}.Crawl(ctx, crawler.Options{
+		Query: *query, Limit: *limit, Include: csvTerms(*include), Exclude: csvTerms(*exclude), CandidateFactor: *candidateFactor,
+	})
 	if err != nil {
 		log.Fatalf("crawl failed: %v", err)
 	}
 	log.Printf("crawl complete: %s", crawler.Summary(job))
+	if *extract {
+		client := llm.Client{Provider: cfg.LLMProvider, BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, Model: cfg.LLMModel,
+			HTTP: &http.Client{Timeout: cfg.LLMTimeout}, UserAgent: cfg.HTTPUserAgent, EnableWebSearch: cfg.LLMWebSearch}
+		svc := classify.Service{DB: gdb, LLM: client, PromptPath: *promptPath, PromptVersion: "classify_paper_v2", LLMTimeout: cfg.LLMTimeout}
+		if err := svc.ClassifyPending(context.Background(), *limit); err != nil {
+			log.Fatalf("extract failed: %v", err)
+		}
+		log.Printf("extraction complete")
+	}
+}
+
+func csvTerms(raw string) []string {
+	var out []string
+	for _, term := range strings.Split(raw, ",") {
+		if term = strings.TrimSpace(term); term != "" {
+			out = append(out, term)
+		}
+	}
+	return out
 }
 
 func mustClassify(cfg config.Config, args []string) {
@@ -131,7 +157,7 @@ func mustClassify(cfg config.Config, args []string) {
 	}
 	client := llm.Client{
 		Provider: cfg.LLMProvider, BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, Model: cfg.LLMModel,
-		HTTP: &http.Client{Timeout: cfg.LLMTimeout}, UserAgent: cfg.HTTPUserAgent,
+		HTTP: &http.Client{Timeout: cfg.LLMTimeout}, UserAgent: cfg.HTTPUserAgent, EnableWebSearch: cfg.LLMWebSearch,
 	}
 	if !client.Enabled() {
 		log.Printf("LLM disabled; using rule-based fallback only")

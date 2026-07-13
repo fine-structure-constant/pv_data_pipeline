@@ -33,7 +33,7 @@ func (s Service) ClassifyPending(ctx context.Context, limit int) error {
 		limit = 20
 	}
 	var papers []models.Paper
-	if err := s.DB.Order("created_at asc").Limit(limit).Find(&papers).Error; err != nil {
+	if err := s.DB.Where("extraction_status IN ?", []string{"not_started", "failed", ""}).Order("created_at desc").Limit(limit).Find(&papers).Error; err != nil {
 		return err
 	}
 	prompt, err := os.ReadFile(s.PromptPath)
@@ -101,7 +101,49 @@ func (s Service) classifyOne(ctx context.Context, paper models.Paper, prompt str
 	if err := s.assignLLMTags(paper.ID, parsed); err != nil {
 		return err
 	}
+	if err := s.persistCompositions(paper, parsed.DetectedCompositions); err != nil {
+		return err
+	}
 	return s.updateExtractionStatus(paper.ID, "done")
+}
+
+func (s Service) persistCompositions(paper models.Paper, detected []map[string]any) error {
+	for _, item := range detected {
+		formula, _ := item["formula_raw"].(string)
+		formula = strings.TrimSpace(formula)
+		if formula == "" {
+			continue
+		}
+		normalized, _ := item["normalized_hint"].(string)
+		if normalized == "" {
+			normalized = strings.ToUpper(strings.ReplaceAll(formula, " ", ""))
+		}
+		var material models.Material
+		err := s.DB.Where("name = ?", formula).First(&material).Error
+		if err == gorm.ErrRecordNotFound {
+			material = models.Material{Name: formula, Notes: "LLM-extracted composition"}
+			if err := s.DB.Create(&material).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(item)
+		var count int64
+		if err := s.DB.Model(&models.Composition{}).Where("material_id = ? AND normalized = ?", material.ID, normalized).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			composition := models.Composition{MaterialID: material.ID, FormulaRaw: formula, Normalized: normalized, Composition: datatypes.JSON(payload)}
+			if err := s.DB.Create(&composition).Error; err != nil {
+				return err
+			}
+		}
+		if err := s.DB.Model(&paper).Association("Materials").Append(&material); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // assignRuleTags persists the tags produced by the rule engine for a paper.

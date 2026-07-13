@@ -21,6 +21,7 @@ llm:
   api_key: secret
   model: test-model
   timeout_seconds: 12
+  enable_web_search: true
 http:
   user_agent: TestAgent/1.0
   request_timeout_seconds: 7
@@ -47,6 +48,9 @@ download:
 	}
 	if cfg.LLMTimeout != 12*time.Second || cfg.RequestTimeout != 7*time.Second || cfg.CrawlRateLimit != 250*time.Millisecond {
 		t.Fatalf("unexpected duration config: %#v", cfg)
+	}
+	if !cfg.LLMWebSearch {
+		t.Fatal("expected web search enabled")
 	}
 	if cfg.DownloadMaxBytes != 12345 {
 		t.Fatalf("unexpected max bytes: %d", cfg.DownloadMaxBytes)
